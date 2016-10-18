@@ -19,9 +19,9 @@ import java.util.logging.Logger;
  */
 
 class Field{
-    String name;    //Название столбца
-    int size;       //Ширина столбца в байтах
-    int offset;     //Смещение от начала записи в байтах
+    private String name;    //Название столбца
+    private int size;       //Ширина столбца в байтах
+    private int offset;     //Смещение от начала записи в байтах
         
     public Field(String newName, int newSize, int newOffset){
         name = newName;
@@ -37,6 +37,30 @@ class Field{
             }
         return fieldArrayReturn;
     }
+//<editor-fold defaultstate="collapsed" desc="SETERS-GETERS">
+    void setName(String newName){
+        name = newName;
+    }
+    
+    void setSize(int newSize){
+        size = newSize;
+    }
+    
+    void setOffset(int newOffset){
+        offset = newOffset;
+    }
+    
+    String getName(){
+        return name;
+    }
+    
+    int getSize(){
+        return size;
+    }
+    int getOffset(){
+        return offset;
+    }
+//</editor-fold>
 }
 
 class DbfFile {
@@ -51,6 +75,7 @@ class DbfFile {
     private Field [] fieldArray;
         //------
     private String filePath = "";//E:\\0302.dbf"; 
+    private Object[][] tableData;               //Данные для отображения в jTable
         
     public DbfFile(String filePathToOpen){
         filePath = filePathToOpen;
@@ -85,47 +110,54 @@ class DbfFile {
             inputStream = new FileInputStream(filePath);  //Откроем еше раз, чтобы вернуться в начало файла, как иначе хз
             inputStream.skip(32);       //Пропустили заголовок
 
-            //Парсим описания столбцов таблицы:
+        //Парсим описания столбцов таблицы (fieldArray):
             fieldArray = Field.initializeFieldsArray(numOfFields);  //Инициализируем массив столбцов
-            
             for (int i = 0; i < fieldArray.length; i++){
                 inputStream.read(byteBufferArray, 0, HEADER_FIELD_LENGTH);    //32 байта 
-                
                 //Название столбца (вытащили из байтового массива и убрали пробелы с конца одной коммандой! >:3 )
                 //new String корректно отработает с default charset ASCII, на линуксе или в Японии с UTF Default будут проблемы 
-                fieldArray[i].name = new String(Arrays.copyOfRange(byteBufferArray, 0, CURRENT_FIELD_NAME)).trim();  //9 байт
-                
+                fieldArray[i].setName(new String(Arrays.copyOfRange(byteBufferArray, 0, CURRENT_FIELD_NAME)).trim());  //9 байт
                 //Размер столбца
-                fieldArray[i].size = (byteBufferArray[CURRENT_FIELD_LENGTH]>0)?
-                    byteBufferArray[CURRENT_FIELD_LENGTH]:
-                    byteBufferArray[CURRENT_FIELD_LENGTH] & 0xFF;
+                if (byteBufferArray[CURRENT_FIELD_LENGTH]>0){
+                    fieldArray[i].setSize(byteBufferArray[CURRENT_FIELD_LENGTH]);
+                } else{
+                    fieldArray[i].setSize(byteBufferArray[CURRENT_FIELD_LENGTH] & 0xFF);
+                }
                 //Сдвиг от начала записи в байтах
                 if (i != 0){
-                    fieldArray[i].offset = fieldArray[i-1].offset+fieldArray[i-1].size;
+                    fieldArray[i].setOffset(fieldArray[i-1].getOffset()+fieldArray[i-1].getSize());
                 } else{
-                    fieldArray[i].offset = 0;
+                    fieldArray[i].setOffset(0);
                 }
-                
-                //Сдвиг от начала записи в байтах
             }
-            
-            System.out.print("\n");
-            System.out.format("endOfHeaderOffset:%4d \nnumOfFields:%3d \nnumOfRecords:%4d \noneRecordLength:%4d\n\n", endOfHeaderOffset, numOfFields, numOfRecords, oneRecordLength);
-            
-            for (Field fieldArray1 : fieldArray) {
-                System.out.format("%10s | %5d | %5d \n", fieldArray1.name, fieldArray1.size, fieldArray1.offset);
-            }
-            System.out.print("\n");
-            
+        //---    
+
+        //Парсим строки таблицы (tableData):
+            String currentLine = "";
             //Файловый курсор сейчас перед 0xD, пропустим [0xD, 0x0]
             inputStream.skip(2);
+            
+            tableData = new String [numOfRecords][numOfFields];
             for (int i = 0; i < numOfRecords; i++){
                 //Считали одну запись в byteBufferArray
                 inputStream.read(byteBufferArray, 0, oneRecordLength);
                 //Декодировали массив byteBufferArray, обернутый в байтбуффер в UTF-16 
                 //Имеем на выходе строку UTF-16 с полями из DBF файла
-                System.out.println(FILE_CHARSET.decode(ByteBuffer.wrap(byteBufferArray,0, oneRecordLength)));                
+                currentLine = FILE_CHARSET.decode(ByteBuffer.wrap(byteBufferArray,0, oneRecordLength)).toString();
+                for(int j =0; j < numOfFields; j++){
+                    tableData[i][j] = currentLine.substring(fieldArray[j].getOffset()+1, //Почему смещение на 1 байт вправо?
+                                                                    fieldArray[j].getOffset() + fieldArray[j].getSize()+1).trim();
+                }
             }
+        //---    
+            
+            /*for (int i = 0; i < numOfRecords; i++){
+            //Считали одну запись в byteBufferArray
+            inputStream.read(byteBufferArray, 0, oneRecordLength);
+            //Декодировали массив byteBufferArray, обернутый в байтбуффер в UTF-16
+            //Имеем на выходе строку UTF-16 с полями из DBF файла
+            System.out.println(FILE_CHARSET.decode(ByteBuffer.wrap(byteBufferArray,0, oneRecordLength)));
+            }*/
             
         } catch (IOException ex) {
             Logger.getLogger(DbfFile.class.getName()).log(Level.SEVERE, null, ex);
@@ -139,6 +171,35 @@ class DbfFile {
         }
             //--
     }//End of DbfFile Constructor method
+    
+    int getNumOfRecords(){
+        return numOfRecords;
+    }
+    int getNumOfFields(){
+        return numOfFields;
+    }
+    
+    Field[] getFieldArray(){
+        return fieldArray;
+    }
+    
+    Object[][] getTableDataToShow(){
+        return tableData;  
+    }   
+    
+    int getOneRecordLength(){
+        return oneRecordLength;
+    }
+    
+    void printFileInfo(){
+        System.out.print("\n");
+        System.out.format("endOfHeaderOffset:%4d \nnumOfFields:%3d \nnumOfRecords:%4d \noneRecordLength:%4d\n\n", endOfHeaderOffset, numOfFields, numOfRecords, oneRecordLength);
+            
+        for (Field fieldArray1 : fieldArray) {
+            System.out.format("%10s | %5d | %5d \n", fieldArray1.getName(), fieldArray1.getSize(), fieldArray1.getOffset());
+        }
+        System.out.print("\n");        
+    }
 }
 
 public class DbfByteReaderTest {
@@ -151,5 +212,15 @@ public class DbfByteReaderTest {
 
     public static void main(String[] args) {
         DbfFile currentDbf = new DbfFile("E:\\0302.dbf");
+        currentDbf.printFileInfo();
+                
+        for(int i = 0; i < currentDbf.getNumOfRecords(); i++){
+            for(int j = 0; j < currentDbf.getNumOfFields(); j++){
+                System.out.printf("%"+currentDbf.getFieldArray()[j].getSize()+"s",currentDbf.getTableDataToShow()[i][j]);
+            }            
+            System.out.print("\n");
+        }
+
+                
     }
 }
